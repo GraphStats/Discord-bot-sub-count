@@ -8,7 +8,6 @@ dotenv.config();
 
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
-const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers] });
