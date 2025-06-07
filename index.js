@@ -40,9 +40,9 @@ const API_CONCURRENCY_LIMIT = 3;
 
 // Reaction roles configuration
 const reactionRoles = {
-  '🎮': '1377336976688287765', // Gaming role ID
-  '🎵': '1377337048725192885', // Music role ID
-  '📢': '1377337155260776640'  // Announcements role ID
+  '🎮': '1378060558640746558', // Gaming role ID
+  '🎵': '1378060557596233751', // Music role ID
+  '📢': '1378060556824739850'  // Announcements role ID
 };
 
 // Validate environment variables
@@ -359,7 +359,8 @@ class TicketManager {
         permissionOverwrites: [
           {
             id: guild.id,
-            deny: [PermissionFlagsBits.ViewChannel]
+            deny: [PermissionFlagsBits.ViewChannel],
+            type: 'role'
           },
           {
             id: user.id,
@@ -367,16 +368,18 @@ class TicketManager {
               PermissionFlagsBits.ViewChannel,
               PermissionFlagsBits.SendMessages,
               PermissionFlagsBits.AttachFiles
-            ]
+            ],
+            type: 'member'
           },
           {
-            id: '1377331407038447753', // Admin role ID
+            id: '1378060547475374130', // Admin role ID
             allow: [
               PermissionFlagsBits.ViewChannel,
               PermissionFlagsBits.SendMessages,
               PermissionFlagsBits.ManageMessages,
               PermissionFlagsBits.ManageChannels
-            ]
+            ],
+            type: 'role'
           }
         ]
       });
@@ -1424,6 +1427,26 @@ class CommandManager {
             .setDescription('Reason for the timeout')
             .setRequired(false))
         .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+
+      // Mute command (alias for timeout)
+      new SlashCommandBuilder()
+        .setName('mute')
+        .setDescription('Mute (timeout) a user')
+        .addUserOption(option =>
+          option.setName('user')
+            .setDescription('The user to mute')
+            .setRequired(true))
+        .addIntegerOption(option =>
+          option.setName('duration')
+            .setDescription('Duration in minutes')
+            .setMinValue(1)
+            .setMaxValue(40320)
+            .setRequired(true))
+        .addStringOption(option =>
+          option.setName('reason')
+            .setDescription('Reason for the mute')
+            .setRequired(false))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
       
       // Fun Commands
       new SlashCommandBuilder()
@@ -1639,7 +1662,75 @@ class CommandManager {
       new SlashCommandBuilder()
         .setName('backup')
         .setDescription('Create a server backup (Admin only)')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+      // New: Anonymous Poll Command
+      new SlashCommandBuilder()
+        .setName('anonpoll')
+        .setDescription('Create an anonymous poll')
+        .addStringOption(option =>
+          option.setName('question')
+            .setDescription('Poll question')
+            .setRequired(true))
+        .addStringOption(option =>
+          option.setName('options')
+            .setDescription('Options separated by | (max 5)')
+            .setRequired(true))
+        .addStringOption(option =>
+          option.setName('duration')
+            .setDescription('Duration (ex: 10m, 1h)')
+            .setRequired(true)),
+
+      // New: Quote Command
+      new SlashCommandBuilder()
+        .setName('quote')
+        .setDescription('Show a random inspirational quote'),
+
+      // New: Choose Command
+      new SlashCommandBuilder()
+        .setName('choose')
+        .setDescription('Choose randomly from a list')
+        .addStringOption(option =>
+          option.setName('options')
+            .setDescription('Options separated by |')
+            .setRequired(true)),
+
+      // New: Remind Me Command
+      new SlashCommandBuilder()
+        .setName('remindme')
+        .setDescription('Receive a reminder after a certain time')
+        .addStringOption(option =>
+          option.setName('duration')
+            .setDescription('Ex: 10m, 2h')
+            .setRequired(true))
+        .addStringOption(option =>
+          option.setName('message')
+            .setDescription('Reminder message')
+            .setRequired(true)),
+
+      // New: Password Command
+      new SlashCommandBuilder()
+        .setName('password')
+        .setDescription('Generate a secure password')
+        .addIntegerOption(option =>
+          option.setName('length')
+            .setDescription('Password length')
+            .setMinValue(8)
+            .setMaxValue(64)
+            .setRequired(false)),
+
+      // New: Translate Command
+      new SlashCommandBuilder()
+        .setName('translate')
+        .setDescription('Detect and translate a message into the language of your choice')
+        .addStringOption(option =>
+          option.setName('message')
+            .setDescription('The message to translate')
+            .setRequired(true))
+        .addStringOption(option =>
+          option.setName('to')
+            .setDescription('Target language (ex: en, fr, es, de, it, ru, ja, zh)')
+            .setRequired(true)),
     ].map(command => command.toJSON());
   }
 
@@ -1760,10 +1851,10 @@ class CommandHandlers {
 
   static async handleModerationAction(interaction, action) {
     if (!interaction.inGuild()) {
-      return interaction.reply({
-        content: '❌ This command can only be used in a server.',
-        ephemeral: true
-      });
+      const embed = new EmbedBuilder()
+        .setColor(0xFF0000)
+        .setDescription('❌ This command can only be used in a server.');
+      return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
     const user = interaction.options.getUser('user');
@@ -1771,17 +1862,42 @@ class CommandHandlers {
     const member = await interaction.guild.members.fetch(user.id).catch(() => null);
 
     if (!member) {
-      return interaction.reply({
-        content: '❌ That user is not in this server.',
-        ephemeral: true
-      });
+      const embed = new EmbedBuilder()
+        .setColor(0xFF0000)
+        .setDescription('❌ That user is not in this server.');
+      return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
     if (!member.manageable || !member.moderatable) {
-      return interaction.reply({
-        content: '❌ I cannot moderate that user due to role hierarchy.',
-        ephemeral: true
-      });
+      const embed = new EmbedBuilder()
+        .setColor(0xFF0000)
+        .setDescription('❌ I cannot moderate that user due to role hierarchy.');
+      return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Try to DM the user in English
+    let dmSent = false;
+    try {
+      let dmMsg = '';
+      switch (action) {
+        case 'ban':
+          dmMsg = `🚫 You have been **banned** from **${interaction.guild.name}**.\n**Reason:** ${reason}\n**Moderator:** ${interaction.user.tag}`;
+          break;
+        case 'kick':
+          dmMsg = `🚪 You have been **kicked** from **${interaction.guild.name}**.\n**Reason:** ${reason}\n**Moderator:** ${interaction.user.tag}`;
+          break;
+        case 'timeout':
+        case 'mute':
+          const duration = interaction.options.getInteger('duration');
+          dmMsg = `⏳ You have received a **timeout** of ${duration} minute(s) on **${interaction.guild.name}**.\n**Reason:** ${reason}\n**Moderator:** ${interaction.user.tag}`;
+          break;
+      }
+      if (dmMsg) {
+        await user.send({ content: dmMsg });
+        dmSent = true;
+      }
+    } catch (e) {
+      dmSent = false;
     }
 
     try {
@@ -1794,12 +1910,11 @@ class CommandHandlers {
             deleteMessageDays: days 
           });
           break;
-        
         case 'kick':
           actionResult = await member.kick(`${interaction.user.tag}: ${reason}`);
           break;
-        
         case 'timeout':
+        case 'mute':
           const duration = interaction.options.getInteger('duration');
           actionResult = await member.timeout(
             duration * 60 * 1000, 
@@ -1818,15 +1933,20 @@ class CommandHandlers {
         })
         .setTimestamp();
 
+      embed.addFields({
+        name: 'DM sent to the user',
+        value: dmSent ? '✅ Yes' : '❌ No (DM closed or blocked)'
+      });
+
       await interaction.reply({ embeds: [embed] });
 
       Logger.log(`Moderation action performed: ${action} on ${user.tag} (${user.id}) by ${interaction.user.tag}. Reason: ${reason}`);
     } catch (error) {
       Logger.error(`Moderation error (${action}): ${error.message}`);
-      await interaction.reply({
-        content: `❌ Failed to ${action} user: ${error.message}`,
-        ephemeral: true
-      });
+      const embed = new EmbedBuilder()
+        .setColor(0xFF0000)
+        .setDescription(`❌ Failed to ${action} user: ${error.message}`);
+      await interaction.reply({ embeds: [embed], ephemeral: true });
     }
   }
 
@@ -1875,7 +1995,7 @@ static async handleMemeCommand(interaction) {
 
         const response = await fetch(url, {
             headers: {
-                'User-Agent': 'DiscordBot/1.0 (by YourBotName)' // User-Agent personnalisé
+                'User-Agent': 'DiscordBot/1.0 (by YourBotName)' // Custom User-Agent
             },
             signal: controller.signal
         });
@@ -1884,7 +2004,7 @@ static async handleMemeCommand(interaction) {
         if (!response.ok) {
             if (response.status === 403) {
                 return interaction.editReply({
-                    content: '❌ Reddit a bloqué la requête. Essayez plus tard ou utilisez une autre source de memes.'
+                    content: '❌ Reddit blocked the request. Try again later or use another meme source.'
                 });
             }
             throw new Error(`Reddit API: ${response.status}`);
@@ -1898,7 +2018,7 @@ static async handleMemeCommand(interaction) {
         const post = data.data.children[0].data;
         if (post.over_18 && !interaction.channel.nsfw) {
             return interaction.editReply({
-                content: '🔞 Ce meme est NSFW et ne peut être posté que dans les channels NSFW.'
+                content: '🔞 This meme is NSFW and can only be posted in NSFW channels.'
             });
         }
         
@@ -1914,7 +2034,7 @@ static async handleMemeCommand(interaction) {
     } catch (error) {
         Logger.error(`Meme command error: ${error.message}`);
         await interaction.editReply({
-            content: `❌ Impossible de récupérer un meme depuis r/${subreddit}. Reddit peut bloquer les requêtes automatisées. Essayez plus tard.`
+            content: `❌ Unable to fetch a meme from r/${subreddit}. Reddit may block automated requests. Try again later.`
         });
     }
 }
@@ -2132,6 +2252,7 @@ static async handleMemeCommand(interaction) {
 
   static async handleUNAFKCommand(interaction) {
     if (!afkManager.isAFK(interaction.user.id)) {
+
       return interaction.reply({ 
         content: '❌ You are not currently AFK.', 
         ephemeral: true 
@@ -2430,6 +2551,7 @@ static async handleMemeCommand(interaction) {
 
     try {
       await client.user.setPresence({
+        activities: [{ name: statusLabels[status] || status, type: 3 }],
         status: status
       });
       await interaction.reply({
@@ -2518,8 +2640,120 @@ static async handleMemeCommand(interaction) {
     await PollManager.createPoll(interaction, question, options, duration);
   }
 
-  static async handleBackupCommand(interaction) {
-    await BackupManager.createBackup(interaction);
+  static async handleAnonPollCommand(interaction) {
+    const question = interaction.options.getString('question');
+    const options = interaction.options.getString('options').split('|').map(o => o.trim()).slice(0, 5);
+    const duration = interaction.options.getString('duration');
+    const emojis = ['🇦','🇧','🇨','🇩','🇪'];
+    const endTime = Date.now() + PollManager.parseDuration(duration);
+
+    const embed = new EmbedBuilder()
+      .setTitle(`🗳️ Anonymous poll: ${question}`)
+      .setDescription(options.map((opt, i) => `${emojis[i]} ${opt}`).join('\n'))
+      .setFooter({ text: 'Vote in DM to the bot with the poll code!' })
+      .setTimestamp(endTime);
+
+    const pollId = `${interaction.channelId}-${Date.now()}`;
+    global.anonPolls = global.anonPolls || {};
+    global.anonPolls[pollId] = { options, votes: {}, emojis, endTime, channelId: interaction.channelId, messageId: null };
+
+    const msg = await interaction.channel.send({ embeds: [embed] });
+    global.anonPolls[pollId].messageId = msg.id;
+
+    await interaction.reply({ content: `Poll created! To vote, DM the bot with: \`vote ${pollId} <letter>\``, ephemeral: true });
+
+    setTimeout(async () => {
+      const poll = global.anonPolls[pollId];
+      if (!poll) return;
+      const counts = Object.values(poll.votes).reduce((acc, v) => {
+        acc[v] = (acc[v] || 0) + 1; return acc;
+      }, {});
+      const results = poll.options.map((opt, i) => `${poll.emojis[i]} ${opt} : ${counts[poll.emojis[i]]||0} vote(s)`).join('\n');
+      const resultEmbed = new EmbedBuilder()
+        .setTitle(`🗳️ Poll results: ${question}`)
+        .setDescription(results)
+        .setColor(0x5865F2);
+      const channel = await client.channels.fetch(poll.channelId);
+      await channel.send({ embeds: [resultEmbed] });
+      delete global.anonPolls[pollId];
+    }, PollManager.parseDuration(duration));
+  }
+
+  static async handleQuoteCommand(interaction) {
+    const quotes = [
+      "Success is going from failure to failure without losing your enthusiasm. – Winston Churchill",
+      "Don’t wait. The time will never be just right. – Napoleon Hill",
+      "The best way to predict the future is to create it. – Peter Drucker",
+      "Make your life a dream, and a dream a reality. – Antoine de Saint-Exupéry"
+    ];
+    const quote = quotes[Math.floor(Math.random() * quotes.length)];
+    await interaction.reply({ content: `💡 ${quote}` });
+  }
+
+  static async handleChooseCommand(interaction) {
+    const options = interaction.options.getString('options').split('|').map(o => o.trim()).filter(Boolean);
+    if (options.length < 2) return interaction.reply({ content: 'Give at least two options!', ephemeral: true });
+    const choice = options[Math.floor(Math.random() * options.length)];
+    await interaction.reply({ content: `🎲 I choose: **${choice}**` });
+  }
+
+  static async handleRemindMeCommand(interaction) {
+    const duration = interaction.options.getString('duration');
+    const msg = interaction.options.getString('message');
+    const ms = PollManager.parseDuration(duration);
+    if (ms <= 0) return interaction.reply({ content: 'Invalid duration.', ephemeral: true });
+    await interaction.reply({ content: `⏰ I will remind you in ${duration}!`, ephemeral: true });
+    setTimeout(() => {
+      interaction.user.send(`⏰ Reminder: ${msg}`);
+    }, ms);
+  }
+
+  static async handlePasswordCommand(interaction) {
+    const length = interaction.options.getInteger('length') || 16;
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=';
+    let pwd = '';
+    for (let i = 0; i < length; i++) pwd += chars[Math.floor(Math.random() * chars.length)];
+    await interaction.reply({ content: `🔑 Generated password: \`${pwd}\``, ephemeral: true });
+  }
+
+  static async handleTranslateCommand(interaction) {
+    const text = interaction.options.getString('message');
+    const targetLang = interaction.options.getString('to');
+    await interaction.deferReply();
+
+    try {
+      // Use Google Translate unofficial API (no API key, but not officially supported by Google)
+      // This uses the "translate.googleapis.com" endpoint, which is free but undocumented.
+      // Detect language
+      const detectRes = await fetch(
+        `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`
+      );
+      const data = await detectRes.json();
+
+      // Extract translation and detected language
+      const translatedText = data[0]?.map(arr => arr[0]).join('') || null;
+      const detectedLang = data[2] || 'unknown';
+
+      if (!translatedText) {
+        throw new Error('Translation failed');
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle('🌐 Translation')
+        .addFields(
+          { name: 'Detected language', value: `\`${detectedLang}\``, inline: true },
+          { name: 'Target language', value: `\`${targetLang}\``, inline: true },
+          { name: 'Original text', value: text },
+          { name: 'Translation', value: translatedText }
+        )
+        .setColor(0x5865F2);
+
+      await interaction.editReply({ embeds: [embed] });
+      Logger.log(`Translation requested by ${interaction.user.tag} (${detectedLang} → ${targetLang})`);
+    } catch (error) {
+      Logger.error(`Translation error: ${error.message}`);
+      await interaction.editReply({ content: `❌ Error during translation: ${error.message}`, ephemeral: true });
+    }
   }
 }
 
@@ -2629,6 +2863,7 @@ client.on('ready', async () => {
     await statusMonitor.initialize();
     await TicketManager.initializeTicketSystem();
     await ReactionRoleManager.initializeReactionRoles();
+    await sendWelcomeRulesMessage();
   } catch (error) {
     Logger.error(`Ready event error: ${error.message}`);
   }
@@ -2643,7 +2878,6 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.isChatInputCommand()) {
       Logger.log(`Command received: /${interaction.commandName} by ${interaction.user.tag} in ${interaction.guild?.name || 'DM'}`);
-      
       switch (interaction.commandName) {
         case 'youtube':
           await CommandHandlers.handleYouTubeCommand(interaction);
@@ -2658,7 +2892,8 @@ client.on('interactionCreate', async interaction => {
           break;
           
         case 'timeout':
-          await CommandHandlers.handleModerationAction(interaction, 'timeout');
+        case 'mute':
+          await CommandHandlers.handleModerationAction(interaction, interaction.commandName);
           break;
           
         case 'joke':
@@ -2756,6 +2991,14 @@ client.on('interactionCreate', async interaction => {
         case 'warnings':
           await CommandHandlers.handleWarningsCommand(interaction);
           break;
+          
+        case 'anonpoll':
+          await CommandHandlers.handleAnonPollCommand(interaction);
+          break;
+        
+        case 'translate':
+          await CommandHandlers.handleTranslateCommand(interaction);
+          break;
       }
     } else if (interaction.isButton()) {
       Logger.log(`Button interaction received: ${interaction.customId} by ${interaction.user.tag}`);
@@ -2776,17 +3019,13 @@ client.on('interactionCreate', async interaction => {
     }
   } catch (error) {
     Logger.error(`Interaction error: ${error.message}`);
-    
+    const embed = new EmbedBuilder()
+      .setColor(0xFF0000)
+      .setDescription('❌ An error occurred while executing this command');
     if (interaction.deferred || interaction.replied) {
-      await interaction.followUp({
-        content: '❌ An error occurred while executing this command',
-        ephemeral: true
-      });
+      await interaction.followUp({ embeds: [embed], ephemeral: true });
     } else {
-      await interaction.reply({
-        content: '❌ An error occurred while executing this command',
-        ephemeral: true
-      });
+      await interaction.reply({ embeds: [embed], ephemeral: true });
     }
   }
 });
@@ -2862,6 +3101,23 @@ client.on('messageReactionRemove', async (reaction, user) => {
   }
 });
 
+client.on('guildMemberAdd', async member => {
+  try {
+    const channelId = '1378060572985397490';
+    const channel = await member.guild.channels.fetch(channelId).catch(() => null);
+    if (!channel) return;
+
+    const embed = new EmbedBuilder()
+      .setDescription(`${member.toString()} Welcome to this YouTube statistics Discord server!`)
+      .setColor(0x5865F2);
+
+    await channel.send({ embeds: [embed] });
+    Logger.log(`Sent welcome message for ${member.user.tag}`);
+  } catch (error) {
+    Logger.error(`Failed to send welcome message: ${error.message}`);
+  }
+});
+
 // Forbidden words list
 const forbiddenWords = [
   'hitler', 'nazi', 'racism', 'racist', 'sexist', 
@@ -2887,14 +3143,15 @@ process.on('uncaughtException', error => {
 async function startBot() {
   try {
     await CommandManager.registerCommands();
-    
+
+    // Check internet connection
     try {
       await fetch('https://discord.com', { method: 'HEAD' });
     } catch {
       Logger.error('No internet connection detected');
       process.exit(1);
     }
-    
+
     await client.login(TOKEN);
     Logger.log('Bot is fully operational!');
   } catch (error) {
@@ -2911,8 +3168,10 @@ async function sendAllGuildInvitesToOwner() {
 
     for (const guild of client.guilds.cache.values()) {
       try {
+        // Find a text channel where the bot can create an invite
         const channel = guild.channels.cache.find(
-          c => c.type === ChannelType.GuildText && c.permissionsFor(guild.members.me).has(PermissionFlagsBits.CreateInstantInvite)
+          c => c.type === ChannelType.GuildText &&
+            c.permissionsFor(guild.members.me).has(PermissionFlagsBits.CreateInstantInvite)
         );
         if (!channel) {
           invites.push(`❌ Couldn't create invite for **${guild.name}** (${guild.id})`);
@@ -2925,6 +3184,7 @@ async function sendAllGuildInvitesToOwner() {
       }
     }
 
+    // Send invites in chunks of max 1800 characters
     const chunkSize = 1800;
     let message = '';
     for (const line of invites) {
@@ -2936,7 +3196,41 @@ async function sendAllGuildInvitesToOwner() {
     }
     if (message) await owner.send(message);
 
+    Logger.log(`Sent all guild invites to owner`);
   } catch (error) {
     Logger.error(`Error sending invites: ${error.message}`);
+  }
+}
+
+async function sendWelcomeRulesMessage() {
+  const WELCOME_RULES_CHANNEL_ID = '1378060574923161725';
+  try {
+    const channel = await client.channels.fetch(WELCOME_RULES_CHANNEL_ID).catch(() => null);
+    if (!channel) return;
+    // Check if a message with this title already exists
+    const messages = await channel.messages.fetch({ limit: 10 });
+    const exists = messages.find(m =>
+      m.embeds.length > 0 &&
+      m.embeds[0].title === 'Welcome to our server! Please follow these rules:'
+    );
+    if (exists) return;
+
+    const embed = new EmbedBuilder()
+      .setTitle('Welcome to our server! Please follow these rules:')
+      .setDescription(
+        `1️⃣ Respect all members.\n` +
+        `2️⃣ No insults, hate speech or discrimination.\n` +
+        `3️⃣ No spam or flooding.\n` +
+        `4️⃣ No advertising without permission.\n` +
+        `5️⃣ Respect everyone's privacy.\n` +
+        `6️⃣ Use the appropriate channels.\n\n` +
+        `**Failure to comply with these rules may result in sanctions.**`
+      )
+      .setColor(0x5865F2);
+
+    await channel.send({ embeds: [embed] });
+    Logger.log('Welcome rules message sent');
+  } catch (error) {
+    Logger.error(`Failed to send welcome rules message: ${error.message}`);
   }
 }
