@@ -25,7 +25,7 @@ const AbortController = globalThis.AbortController || (await import('abort-contr
 import fs from 'fs';
 import path from 'path';
 
-// Configuration
+
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
@@ -40,9 +40,9 @@ const API_CONCURRENCY_LIMIT = 3;
 
 // Reaction roles configuration
 const reactionRoles = {
-  '🎮': '1378060558640746558', // Gaming role ID
-  '🎵': '1378060557596233751', // Music role ID
-  '📢': '1378060556824739850'  // Announcements role ID
+  '🎮': '1378060558640746558',
+  '🎵': '1378060557596233751',
+  '📢': '1378060556824739850'
 };
 
 // Validate environment variables
@@ -1731,6 +1731,20 @@ class CommandManager {
           option.setName('to')
             .setDescription('Target language (ex: en, fr, es, de, it, ru, ja, zh)')
             .setRequired(true)),
+      
+      // Ajout de la commande bump
+      new SlashCommandBuilder()
+        .setName('bump')
+        .setDescription('Mettez en avant le serveur (cooldown 1h)'),
+      
+      // New: Uptime Command
+      new SlashCommandBuilder()
+        .setName('uptime')
+        .setDescription('Affiche depuis combien de temps le bot est en ligne'),
+      new SlashCommandBuilder()
+        .setName('update')
+        .setDescription('Redémarre le bot (Admin uniquement)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     ].map(command => command.toJSON());
   }
 
@@ -2755,6 +2769,65 @@ static async handleMemeCommand(interaction) {
       await interaction.editReply({ content: `❌ Error during translation: ${error.message}`, ephemeral: true });
     }
   }
+
+  static async handleBumpCommand(interaction) {
+    if (!interaction.guild) {
+      return interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
+    }
+    const userId = interaction.user.id;
+    const guildId = interaction.guild.id;
+    let bumpData = loadBumpData();
+    if (!bumpData[guildId]) bumpData[guildId] = {};
+    const lastBump = bumpData[guildId][userId] || 0;
+    const now = Date.now();
+    const cooldownMs = 60 * 60 * 1000;
+    const remaining = lastBump + cooldownMs - now;
+    if (remaining > 0) {
+      const minutes = Math.ceil(remaining / 60000);
+      return interaction.reply({
+        content: `⏳ You need to wait ${minutes} more minute${minutes > 1 ? 's' : ''} before bumping again on this server.`,
+        ephemeral: true
+      });
+    }
+
+    // Save bump time
+    bumpData[guildId][userId] = now;
+    saveBumpData(bumpData);
+
+    // Confirmation embed
+    const embed = new EmbedBuilder()
+      .setTitle('🚀 Server Highlighted!')
+      .setDescription(`This server has just been bumped by ${interaction.user}.\n\nYou can bump again in 1 hour.`)
+      .setColor(0x00BFFF)
+      .setTimestamp();
+
+    await interaction.reply({ embeds: [embed] });
+
+    // Notify after 1h
+    setTimeout(async () => {
+      try {
+        await interaction.user.send({
+          content: `🔔 You can use the /bump command again on **${interaction.guild?.name || 'the server'}**!`
+        });
+      } catch {}
+    }, cooldownMs);
+  }
+}
+
+// Add bump storage path and load/save helpers
+const bumpDataPath = path.join(process.cwd(), 'bump.json');
+function loadBumpData() {
+  try {
+    if (fs.existsSync(bumpDataPath)) {
+      return JSON.parse(fs.readFileSync(bumpDataPath, 'utf-8'));
+    }
+  } catch {}
+  return {};
+}
+function saveBumpData(data) {
+  try {
+    fs.writeFileSync(bumpDataPath, JSON.stringify(data, null, 2));
+  } catch {}
 }
 
 // Warning System
@@ -2864,6 +2937,7 @@ client.on('ready', async () => {
     await TicketManager.initializeTicketSystem();
     await ReactionRoleManager.initializeReactionRoles();
     await sendWelcomeRulesMessage();
+    await sendWarningSystemMessage(); // Ajout ici
   } catch (error) {
     Logger.error(`Ready event error: ${error.message}`);
   }
@@ -2999,6 +3073,35 @@ client.on('interactionCreate', async interaction => {
         case 'translate':
           await CommandHandlers.handleTranslateCommand(interaction);
           break;
+        
+        // --- AJOUTS ---
+        case 'cat':
+          await CommandHandlers.handleCatCommand(interaction);
+          break;
+        case 'dog':
+          await CommandHandlers.handleDogCommand(interaction);
+          break;
+        case 'urban':
+          await CommandHandlers.handleUrbanCommand(interaction);
+          break;
+        case '8ball':
+          await CommandHandlers.handle8BallCommand(interaction);
+          break;
+        case 'reverse':
+          await CommandHandlers.handleReverseCommand(interaction);
+          break;
+        case 'math':
+          await CommandHandlers.handleMathCommand(interaction);
+          break;
+        case 'bump':
+          await CommandHandlers.handleBumpCommand(interaction);
+          break;
+        case 'uptime':
+          await CommandHandlers.handleUptimeCommand(interaction);
+          break;
+        case 'update':
+          await CommandHandlers.handleUpdateCommand(interaction);
+          break;
       }
     } else if (interaction.isButton()) {
       Logger.log(`Button interaction received: ${interaction.customId} by ${interaction.user.tag}`);
@@ -3087,6 +3190,21 @@ client.on('messageReactionAdd', async (reaction, user) => {
     if (giveaway) {
       giveaway.participants.add(user.id);
       giveawayManager.saveGiveaways();
+    }
+
+    // Attribution du rôle après réaction ✅ sur le message des règles
+    if (
+      reaction.message.channelId === RULES_CHANNEL_ID &&
+      reaction.message.id === RULES_MESSAGE_ID &&
+      reaction.emoji.name === '✅' &&
+      !user.bot
+    ) {
+      const guild = reaction.message.guild;
+      const member = await guild.members.fetch(user.id).catch(() => null);
+      if (member && !member.roles.cache.has(RULES_ROLE_ID)) {
+        await member.roles.add(RULES_ROLE_ID, 'Accepted rules');
+        Logger.log(`Rôle des règles attribué à ${user.tag}`);
+      }
     }
   } catch (error) {
     Logger.error(`Reaction add error: ${error.message}`);
@@ -3222,15 +3340,58 @@ async function sendWelcomeRulesMessage() {
         `2️⃣ No insults, hate speech or discrimination.\n` +
         `3️⃣ No spam or flooding.\n` +
         `4️⃣ No advertising without permission.\n` +
-        `5️⃣ Respect everyone's privacy.\n` +
-        `6️⃣ Use the appropriate channels.\n\n` +
-        `**Failure to comply with these rules may result in sanctions.**`
+        `5️⃣ Use the appropriate channels for your messages.\n` +
+        `6️⃣ Follow Discord's Terms of Service.\n` +
+        `7️⃣ No NSFW content.\n` +
+        `8️⃣ Listen to the staff.\n` +
+        `9️⃣ Have fun and enjoy your stay!`
       )
       .setColor(0x5865F2);
 
     await channel.send({ embeds: [embed] });
-    Logger.log('Welcome rules message sent');
+    Logger.log('Welcome/rules message sent');
   } catch (error) {
-    Logger.error(`Failed to send welcome rules message: ${error.message}`);
+    Logger.error(`Failed to send welcome/rules message: ${error.message}`);
   }
 }
+
+async function sendWarningSystemMessage() {
+  const WARNING_SYSTEM_CHANNEL_ID = '1380948365965135973';
+  try {
+    const channel = await client.channels.fetch(WARNING_SYSTEM_CHANNEL_ID).catch(() => null);
+    if (!channel) return;
+    // Check if a message with this title already exists
+    const messages = await channel.messages.fetch({ limit: 10 });
+    const exists = messages.find(m =>
+      m.embeds.length > 0 &&
+      m.embeds[0].title === 'Warning System'
+    );
+    if (exists) return;
+
+    const embed = new EmbedBuilder()
+      .setTitle('Warning System')
+      .setDescription(
+        `> **1 Warn**: Just a warning, no other punishment\n` +
+        `> **2 Warns**: Timeout 1 Hour\n` +
+        `> **3 Warns**: Timeout 6 Hours\n` +
+        `> **4 Warns**: Timeout 24 Hours\n` +
+        `> **5 Warns**: Timeout 2 Days\n` +
+        `> **6 Warns**: Timeout 4 Days\n` +
+        `> **7 Warns**: Temporary Ban 1 Week\n` +
+        `> **8 Warns**: Temporary Ban 1 Month\n` +
+        `> **9 Warns**: Permanent Ban (Appealable)\n` +
+        `> **10 Warns**: Permanent Ban (NOT Appealable)\n\n`
+      )
+      .setColor(0xFFA500);
+
+    await channel.send({ embeds: [embed] });
+    Logger.log('Warning system message sent');
+  } catch (error) {
+    Logger.error(`Failed to send warning system message: ${error.message}`);
+  }
+}
+
+// Ajoutez ces lignes après les autres constantes de configuration
+const RULES_CHANNEL_ID = process.env.RULES_CHANNEL_ID || '1378060574923161725'; // Remplacez par l'ID réel si besoin
+const RULES_MESSAGE_ID = process.env.RULES_MESSAGE_ID || '1380823315509280819'; // Remplacez par l'ID du message des règles
+const RULES_ROLE_ID = process.env.RULES_ROLE_ID || '1378060554144583833'; // Remplacez par l'ID du rôle à attribuer
